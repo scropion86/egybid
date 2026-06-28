@@ -2,11 +2,11 @@ name: Sync, Build, and Deploy Knowledge Base
 
 on:
   schedule:
-    - cron: '0 0 1 * *'           # Automatically runs every night at midnight UTC
-  workflow_dispatch:              # Adds a manual "Run workflow" button in GitHub
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write                 # Required permission to publish to GitHub Pages
+  contents: write
 
 jobs:
   build-and-deploy:
@@ -22,38 +22,42 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # mkdocs-material covers the site generator, gdown fetches the Drive folder
-          pip install mkdocs-material gdown
-          # pandoc handles the Word to Markdown conversion
-          sudo apt-get install -y pandoc
+          pip install mkdocs-material
+          sudo apt-get install -y pandoc rclone
 
-      - name: Download Google Drive Folder (No API)
+      - name: Securely Sync Google Drive Folder
+        env:
+          # This pulls your encrypted key from GitHub Secrets
+          SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
-          # Fetches the public folder and saves it to a temporary directory called 'gdrive_raw'
-          gdown --folder https://drive.google.com/drive/folders/1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c -O ./gdrive_raw
+          # Create a secure configuration file for rclone
+          mkdir -p ~/.config/rclone
+          cat <<EOF > ~/.config/rclone/rclone.conf
+          [gdrive]
+          type = drive
+          scope = drive.readonly
+          service_account_credentials = $SA_JSON
+          EOF
+          
+          # Sync the folder securely using the API, bypassing anonymous limits
+          rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c --config=~/.config/rclone/rclone.conf
 
       - name: Convert Word Docs to Markdown
         run: |
-          # Create the directory MkDocs expects
           mkdir -p docs
           
-          # Find all .docx files, handle spaces in filenames safely, and convert them
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
-            # Extract the folder structure so categories are maintained
             rel_path="${file#./gdrive_raw/}"
             dir_path=$(dirname "$rel_path")
             filename=$(basename "$file" .docx)
             
-            # Recreate the specific sub-folder inside the docs directory
             mkdir -p "docs/$dir_path"
             
-            # Convert the document and extract any images into an assets folder
             pandoc -f docx -t markdown "$file" \
               -o "docs/$dir_path/$filename.md" \
               --extract-media="docs/$dir_path/assets"
           done
 
-          # CRITICAL: Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
           if [ ! -f docs/index.md ]; then
             echo "# الصفحة الرئيسية" > docs/index.md
             echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
