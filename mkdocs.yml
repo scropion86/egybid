@@ -1,0 +1,58 @@
+# ====================================
+# SITE INFORMATION
+# ====================================
+site_name: قاعدة المعرفة           # The main title of your website
+site_description: مكتبة المستندات الخاصة بي # Brief description
+site_author: Your Name
+
+# ====================================
+# UI, HEADERS, AND THEME
+# ====================================
+theme:
+  name: material
+  language: ar                    # Sets the core UI language to Arabic
+  direction: rtl                  # Enforces Right-to-Left layout globally
+  
+  # Font Configuration
+  font:
+    text: Tajawal                 # A clean, modern Arabic font from Google Fonts
+    code: Roboto Mono             # Font for any code snippets
+  
+  # Color Palette & Dark Mode Toggle
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo             # Top header color
+      accent: blue                # Link and button color
+      toggle:
+        icon: material/weather-night
+        name: تفعيل الوضع الداكن (Switch to Dark Mode)
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: تفعيل الوضع المضيء (Switch to Light Mode)
+
+  # Page Elements and Headers
+  features:
+    - navigation.tabs             # Creates a top header menu for your main folders
+    - navigation.sections         # Groups sub-folders neatly in the sidebar
+    - navigation.top              # Adds a "Back to Top" button when scrolling
+    - header.autohide             # Hides the top header when scrolling down for more reading space
+    - search.suggest              # Suggests words while typing in the search bar
+    - search.highlight            # Highlights the searched word inside the article
+
+# ====================================
+# PLUGINS & EXTENSIONS
+# ====================================
+plugins:
+  - search:
+      lang: ar                    # Optimizes the search engine index specifically for Arabic
+
+markdown_extensions:
+  - tables                        # Ensures tables in Word translate correctly
+  - admonition                    # Allows for styled warning/info boxes
+  - attr_list
+  - md_in_html
