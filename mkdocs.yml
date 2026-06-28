@@ -1,19 +1,22 @@
 # ====================================
 # SITE INFORMATION
 # ====================================
-site_name: مقالات المكتب المصرى للتطوير الصناعي # The main title of your website
-site_description: مقالات المكتب المصرى للتطوير الصناعي # Brief description
+site_name: مقالات المكتب المصرى للتطوير الصناعي
+site_description: مقالات المكتب المصرى للتطوير الصناعي
 site_author: م-محمود مرزوق
 
+# ====================================
+# UI, HEADERS, AND THEME
+# ====================================
 theme:
   name: material
   language: ar
   direction: rtl
-
+  
   font:
     text: Tajawal
     code: Roboto Mono
-
+  
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -31,12 +34,11 @@ theme:
         name: تفعيل الوضع المضيء
 
   features:
-    - navigation.sections
-    - navigation.expand
-    - navigation.top
-    - header.autohide
-    - search.suggest
-    - search.highlight
+    - navigation.indexes          # CRITICAL: Makes the folder names clickable to open the grid page
+    - navigation.top              
+    - header.autohide             
+    - search.suggest              
+    - search.highlight            
 
 plugins:
   - search:
@@ -45,5 +47,5 @@ plugins:
 markdown_extensions:
   - tables
   - admonition
-  - attr_list
-  - md_in_html
+  - attr_list                   # Required for Grid Cards
+  - md_in_html                  # Required for Grid Cards
