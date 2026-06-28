@@ -1,0 +1,51 @@
+name: Sync, Build, and Deploy Knowledge Base
+
+on:
+  schedule:
+    - cron: '0 0 1 * *' # RAt 12:00 AM, on day 1 of the month
+  workflow_dispatch:    # Manual trigger button
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Dependencies
+        run: |
+          pip install mkdocs-material gdown
+          sudo apt-get install -y pandoc
+
+      - name: Download Google Drive Folder (No API)
+        run: |
+          # Use gdown to fetch the folder directly via its URL
+          gdown --folder https://drive.google.com/drive/folders/1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c -O ./gdrive_raw
+
+      - name: Convert Word Docs to Markdown
+        run: |
+          mkdir -p docs
+          
+          # Using print0 and IFS to safely handle filenames with spaces (very common in Drive)
+          find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
+            rel_path="${file#./gdrive_raw/}"
+            dir_path=$(dirname "$rel_path")
+            filename=$(basename "$file" .docx)
+            
+            mkdir -p "docs/$dir_path"
+            
+            pandoc -f docx -t markdown "$file" \
+              -o "docs/$dir_path/$filename.md" \
+              --extract-media="docs/$dir_path/assets"
+          done
+
+      - name: Deploy to GitHub Pages
+        run: mkdocs gh-deploy --force
