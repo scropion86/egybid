@@ -37,12 +37,12 @@ theme:
 
   # Page Elements and Headers
   features:
-    - navigation.tabs             # Creates a top header menu for your main folders
-    - navigation.sections         # Groups sub-folders neatly in the sidebar
+    - navigation.sections         # Groups sub-folders neatly with bold headings
+    - navigation.expand           # Makes the folders behave like an accordion tree that can be opened/closed
     - navigation.top              # Adds a "Back to Top" button when scrolling
-    - header.autohide             # Hides the top header when scrolling down for more reading space
-    - search.suggest              # Suggests words while typing in the search bar
-    - search.highlight            # Highlights the searched word inside the article
+    - header.autohide             # Hides the top header when scrolling down
+    - search.suggest              # Suggests words while typing
+    - search.highlight            # Highlights the searched word
 
 # ====================================
 # PLUGINS & EXTENSIONS
