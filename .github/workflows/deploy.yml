@@ -2,7 +2,7 @@ name: Sync, Build, and Deploy Knowledge Base
 
 on:
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: '0 0 1 * *'
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: '3.x'
 
       - name: Install Dependencies
         run: |
@@ -33,13 +33,13 @@ jobs:
         run: |
           rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
 
-      - name: Convert Word Docs to Markdown
+      - name: Convert Word Docs and Build Grid Layouts
         run: |
           mkdir -p docs
-
+          
+          # 1. Convert Documents & Hide them from Sidebar
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
             if [ ! -s "$file" ]; then
-              echo "WARNING: Skipping empty file: $file"
               continue
             fi
 
@@ -49,22 +49,61 @@ jobs:
             
             mkdir -p -- "docs/$dir_path"
             
-            echo "Processing: $filename"
-            
-            if ! pandoc -f docx -t gfm-raw_html "$file" -o "docs/$dir_path/$filename.md" --extract-media="docs/$dir_path/assets"; then
-              echo "ERROR: Failed to convert $filename."
-            else
+            if pandoc -f docx -t gfm-raw_html "$file" -o "docs/$dir_path/$filename.md" --extract-media="docs/$dir_path/assets"; then
+              # Clean up word formatting
               sed -i -E 's/\{dir="rtl"\}//g' "docs/$dir_path/$filename.md"
               sed -i -E 's/\{\.underline\}//g' "docs/$dir_path/$filename.md"
               sed -i -E 's/\[([^]]+)\]/\1/g' "docs/$dir_path/$filename.md"
               sed -i -E 's/\\$//g' "docs/$dir_path/$filename.md"
               sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
+              
+              # CRITICAL UX FIX: Add frontmatter to hide the article from the sidebar list
+              cat <<EOF > temp.md
+          ---
+          hide:
+            - navigation
+          ---
+          EOF
+              cat "docs/$dir_path/$filename.md" >> temp.md
+              mv temp.md "docs/$dir_path/$filename.md"
             fi
           done
 
+          # 2. Generate the Category Landing Pages (Grid Cards) with Article Counts
+          find docs -mindepth 1 -type d | while IFS= read -r dir; do
+            # Skip asset folders
+            if [[ "$dir" == *"assets"* ]]; then continue; fi
+            
+            foldername=$(basename -- "$dir")
+            # Count the number of articles in this specific folder
+            count=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | wc -l)
+            
+            if [ "$count" -gt 0 ]; then
+              index_file="$dir/index.md"
+              
+              # Create the landing page with the count in the title
+              echo "---" > "$index_file"
+              echo "title: \"$foldername ($count)\"" >> "$index_file"
+              echo "---" >> "$index_file"
+              echo "# $foldername" >> "$index_file"
+              echo "" >> "$index_file"
+              
+              # Build the Grid Cards
+              echo "<div class=\"grid cards\" markdown>" >> "$index_file"
+              
+              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | while IFS= read -r md_file; do
+                article_name=$(basename -- "$md_file" .md)
+                echo "- [**$article_name**]($article_name.md)" >> "$index_file"
+              done
+              
+              echo "</div>" >> "$index_file"
+            fi
+          done
+
+          # 3. Auto-generate the main homepage if missing
           if [ ! -f docs/index.md ]; then
             echo "# الصفحة الرئيسية" > docs/index.md
-            echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+            echo "مرحباً بك في مقالات المكتب المصرى للتطوير الصناعي. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
           fi
 
       - name: Deploy to GitHub Pages
