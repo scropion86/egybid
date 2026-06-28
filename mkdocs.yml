@@ -1,9 +1,9 @@
 # ====================================
 # SITE INFORMATION
 # ====================================
-site_name: قاعدة المعرفة           # The main title of your website
-site_description: مكتبة المستندات الخاصة بي # Brief description
-site_author: Your Name
+site_name: مقالات المكتب المصرى للتطوير الصناعي           # The main title of your website
+site_description: مقالات المكتب المصرى للتطوير الصناعي # Brief description
+site_author: مهندس محمود مرزوق
 
 # ====================================
 # UI, HEADERS, AND THEME
