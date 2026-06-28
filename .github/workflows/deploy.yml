@@ -2,7 +2,7 @@ name: Sync, Build, and Deploy Knowledge Base
 
 on:
   schedule:
-    - cron: '0 0 * * *'           # Automatically runs every night at midnight UTC
+    - cron: '0 0 1 * *'           # Automatically runs every night at midnight UTC
   workflow_dispatch:              # Adds a manual "Run workflow" button in GitHub
 
 permissions:
@@ -27,36 +27,41 @@ jobs:
 
       - name: Securely Sync Google Drive Folder
         env:
-          # Define the rclone config directly via environment variables
           RCLONE_CONFIG_GDRIVE_TYPE: drive
           RCLONE_CONFIG_GDRIVE_SCOPE: drive.readonly
           RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
-          # Sync the folder securely using the API and environment variables
           rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
 
       - name: Convert Word Docs to Markdown
         run: |
-          # Create the directory MkDocs expects
           mkdir -p docs
           
-          # Find all .docx files, handle spaces in filenames safely, and convert them
+          # Find all .docx files and process them safely
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
-            # Extract the folder structure so categories are maintained
+            # 1. Check if file is empty (0 bytes)
+            if [ ! -s "$file" ]; then
+              echo "⚠️ WARNING: Skipping empty file: $file"
+              continue
+            fi
+
             rel_path="${file#./gdrive_raw/}"
             dir_path=$(dirname "$rel_path")
             filename=$(basename "$file" .docx)
             
-            # Recreate the specific sub-folder inside the docs directory
             mkdir -p "docs/$dir_path"
             
-            # Convert the document and extract any images into an assets folder
-            pandoc -f docx -t markdown "$file" \
+            echo "Processing: $filename"
+            
+            # 2. Run pandoc and capture errors without breaking the entire loop
+            if ! pandoc -f docx -t markdown "$file" \
               -o "docs/$dir_path/$filename.md" \
-              --extract-media="docs/$dir_path/assets"
+              --extract-media="docs/$dir_path/assets"; then
+              echo "❌ ERROR: Failed to convert $filename. File might be corrupted."
+            fi
           done
 
-          # CRITICAL: Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
+          # Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
           if [ ! -f docs/index.md ]; then
             echo "# الصفحة الرئيسية" > docs/index.md
             echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
