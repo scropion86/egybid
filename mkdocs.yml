@@ -13,6 +13,10 @@ theme:
   language: ar
   direction: rtl
   
+  # Injecting your Logo
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  
   font:
     text: Tajawal
     code: Roboto Mono
@@ -34,7 +38,6 @@ theme:
         name: تفعيل الوضع المضيء
 
   features:
-    - navigation.indexes          # CRITICAL: Makes the folder names clickable to open the grid page
     - navigation.top              
     - header.autohide             
     - search.suggest              
@@ -47,5 +50,17 @@ plugins:
 markdown_extensions:
   - tables
   - admonition
-  - attr_list                   # Required for Grid Cards
-  - md_in_html                  # Required for Grid Cards
+  - attr_list                   
+  - md_in_html                  
+
+# ====================================
+# FOOTER SOCIAL LINKS
+# ====================================
+extra:
+  social:
+    - icon: fontawesome/solid/globe
+      link: https://egybid.com/
+      name: Website
+    - icon: fontawesome/brands/facebook
+      link: https://www.facebook.com/Marzouk01272873007/
+      name: Facebook
