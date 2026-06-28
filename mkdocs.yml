@@ -3,7 +3,7 @@
 # ====================================
 site_name: مقالات المكتب المصرى للتطوير الصناعي           # The main title of your website
 site_description: مقالات المكتب المصرى للتطوير الصناعي # Brief description
-site_author: مهندس محمود مرزوق
+site_author: م/محمود مرزوق
 
 # ====================================
 # UI, HEADERS, AND THEME
@@ -22,27 +22,27 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo             # Top header color
-      accent: blue                # Link and button color
+      primary: indigo             
+      accent: blue                
       toggle:
         icon: material/weather-night
-        name: تفعيل الوضع الداكن (Switch to Dark Mode)
+        name: تفعيل الوضع الداكن
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: indigo
       accent: blue
       toggle:
         icon: material/weather-sunny
-        name: تفعيل الوضع المضيء (Switch to Light Mode)
+        name: تفعيل الوضع المضيء
 
   # Page Elements and Headers
   features:
-    - navigation.sections         # Groups sub-folders neatly with bold headings
-    - navigation.expand           # Makes the folders behave like an accordion tree that can be opened/closed
+    - navigation.sections         # Groups sub-folders neatly in the sidebar
+    - navigation.expand           # Creates the collapsible tree on the right side
     - navigation.top              # Adds a "Back to Top" button when scrolling
-    - header.autohide             # Hides the top header when scrolling down
-    - search.suggest              # Suggests words while typing
-    - search.highlight            # Highlights the searched word
+    - header.autohide             # Hides the top header when scrolling down for more reading space
+    - search.suggest              # Suggests words while typing in the search bar
+    - search.highlight            # Highlights the searched word inside the article
 
 # ====================================
 # PLUGINS & EXTENSIONS
