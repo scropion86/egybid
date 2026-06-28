@@ -35,40 +35,36 @@ jobs:
 
       - name: Convert Word Docs to Markdown
         run: |
-          mkdir -p docs
-          
-          # Find all .docx files and process them safely
-          find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
-            # 1. Check if file is empty (0 bytes)
-            if [ ! -s "$file" ]; then
-              echo "⚠️ WARNING: Skipping empty file: $file"
-              continue
-            fi
-
-            rel_path="${file#./gdrive_raw/}"
-            
-            # 2. Add '--' to protect against folder/file names that start with a dash (-)
-            dir_path=$(dirname -- "$rel_path")
-            filename=$(basename -- "$file" .docx)
-            
-            # 3. Add '--' to mkdir to protect against directory names starting with a dash
-            mkdir -p -- "docs/$dir_path"
-            
-            echo "Processing: $filename"
-            
-            # 4. Run pandoc safely
-            if ! pandoc -f docx -t markdown "$file" \
-              -o "docs/$dir_path/$filename.md" \
-              --extract-media="docs/$dir_path/assets"; then
-              echo "❌ ERROR: Failed to convert $filename. File might be corrupted."
-            fi
-          done
-
-          # Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
-          if [ ! -f docs/index.md ]; then
-            echo "# الصفحة الرئيسية" > docs/index.md
-            echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
-          fi
-
-      - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+                mkdir -p docs
+                
+                find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
+                  if [ ! -s "$file" ]; then
+                    echo "⚠️ WARNING: Skipping empty file: $file"
+                    continue
+                  fi
+      
+                  rel_path="${file#./gdrive_raw/}"
+                  dir_path=$(dirname -- "$rel_path")
+                  filename=$(basename -- "$file" .docx)
+                  
+                  mkdir -p -- "docs/$dir_path"
+                  
+                  echo "Processing: $filename"
+                  
+                  # Run pandoc to convert the document
+                  if ! pandoc -f docx -t gfm-raw_html "$file" \
+                    -o "docs/$dir_path/$filename.md" \
+                    --extract-media="docs/$dir_path/assets"; then
+                    echo "❌ ERROR: Failed to convert $filename."
+                  else
+                    # THE FIX: Safely remove hashtags without destroying Markdown headers.
+                    # This looks for a '#' followed by any characters that are NOT a space or another '#'.
+                    sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
+                  fi
+                done
+      
+                # Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
+                if [ ! -f docs/index.md ]; then
+                  echo "# الصفحة الرئيسية" > docs/index.md
+                  echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+                fi
