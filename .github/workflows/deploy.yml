@@ -2,7 +2,7 @@ name: Sync, Build, and Deploy Knowledge Base
 
 on:
   schedule:
-    - cron: '0 0 1 * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 permissions:
@@ -35,9 +35,9 @@ jobs:
 
       - name: Convert Word Docs and Build Layouts
         run: |
-          # Create assets directory and download the logo
+          # Create assets directory and download the logo safely (masquerading as Chrome)
           mkdir -p docs/assets
-          wget -qO docs/assets/logo.png https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png
+          wget -U "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -qO docs/assets/logo.png https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png || true
           
           # 1. Convert Documents
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
