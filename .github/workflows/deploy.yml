@@ -32,39 +32,49 @@ jobs:
           RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
           rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
-
-      - name: Convert Word Docs to Markdown
-        run: |
-                mkdir -p docs
-                
-                find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
-                  if [ ! -s "$file" ]; then
-                    echo "⚠️ WARNING: Skipping empty file: $file"
-                    continue
-                  fi
-      
-                  rel_path="${file#./gdrive_raw/}"
-                  dir_path=$(dirname -- "$rel_path")
-                  filename=$(basename -- "$file" .docx)
-                  
-                  mkdir -p -- "docs/$dir_path"
-                  
-                  echo "Processing: $filename"
-                  
-                  # Run pandoc to convert the document
-                  if ! pandoc -f docx -t gfm-raw_html "$file" \
-                    -o "docs/$dir_path/$filename.md" \
-                    --extract-media="docs/$dir_path/assets"; then
-                    echo "❌ ERROR: Failed to convert $filename."
-                  else
-                    # THE FIX: Safely remove hashtags without destroying Markdown headers.
-                    # This looks for a '#' followed by any characters that are NOT a space or another '#'.
-                    sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
-                  fi
-                done
-      
-                # Auto-generate the homepage (index.md) if there wasn't a Word doc named 'index.docx'
-                if [ ! -f docs/index.md ]; then
-                  echo "# الصفحة الرئيسية" > docs/index.md
-                  echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+    
+     - name: Convert Word Docs to Markdown
+      run: |
+              mkdir -p docs
+              
+              find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
+                if [ ! -s "$file" ]; then
+                  echo "⚠️ WARNING: Skipping empty file: $file"
+                  continue
                 fi
+    
+                rel_path="${file#./gdrive_raw/}"
+                dir_path=$(dirname -- "$rel_path")
+                filename=$(basename -- "$file" .docx)
+                
+                mkdir -p -- "docs/$dir_path"
+                
+                echo "Processing: $filename"
+                
+                # Convert using Pandoc
+                if ! pandoc -f docx -t gfm-raw_html "$file" \
+                  -o "docs/$dir_path/$filename.md" \
+                  --extract-media="docs/$dir_path/assets"; then
+                  echo "❌ ERROR: Failed to convert $filename."
+                else
+                  # --- THE CLEANUP SCRIPT ---
+                  
+                  # 1. Strip the {dir="rtl"} and {.underline} attribute blocks entirely
+                  sed -i -E 's/\{dir="rtl"\}//g' "docs/$dir_path/$filename.md"
+                  sed -i -E 's/\{\.underline\}//g' "docs/$dir_path/$filename.md"
+                  
+                  # 2. Remove the stray brackets [ ] left behind by the spans
+                  sed -i -E 's/\[([^]]+)\]/\1/g' "docs/$dir_path/$filename.md"
+                  
+                  # 3. Remove trailing backslashes (\) that cause weird line breaks
+                  sed -i -E 's/\\$//g' "docs/$dir_path/$filename.md"
+                  
+                  # 4. Safely remove social media hashtags without breaking markdown headers
+                  sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
+                fi
+              done
+    
+              if [ ! -f docs/index.md ]; then
+                echo "# الصفحة الرئيسية" > docs/index.md
+                echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+              fi
