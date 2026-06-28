@@ -1,58 +1,71 @@
-# ====================================
-# SITE INFORMATION
-# ====================================
-site_name: مقالات المكتب المصرى للتطوير الصناعي # The main title of your website
-site_description: مقالات المكتب المصرى للتطوير الصناعي # Brief description
-site_author: م/محمود مرزوق
+name: Sync, Build, and Deploy Knowledge Base
 
-# ====================================
-# UI, HEADERS, AND THEME
-# ====================================
-theme:
-  name: material
-  language: ar # Sets the core UI language to Arabic
-  direction: rtl # Enforces Right-to-Left layout globally
+on:
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
 
-  # Font Configuration
-  font:
-    text: Tajawal # A clean, modern Arabic font from Google Fonts
-    code: Roboto Mono # Font for any code snippets
+permissions:
+  contents: write
 
-  # Color Palette & Dark Mode Toggle
-  palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: blue
-      toggle:
-        icon: material/weather-night
-        name: تفعيل الوضع الداكن
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: blue
-      toggle:
-        icon: material/weather-sunny
-        name: تفعيل الوضع المضيء
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-  # Page Elements and Headers
-  features:
-    - navigation.sections # Groups sub-folders neatly in the sidebar
-    - navigation.expand # Creates the collapsible tree on the right side
-    - navigation.top # Adds a "Back to Top" button when scrolling
-    - header.autohide # Hides the top header when scrolling down for more reading space
-    - search.suggest # Suggests words while typing in the search bar
-    - search.highlight # Highlights the searched word inside the article
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-# ====================================
-# PLUGINS & EXTENSIONS
-# ====================================
-plugins:
-  - search:
-      lang: ar # Optimizes the search engine index specifically for Arabic
+      - name: Install Dependencies
+        run: |
+          pip install mkdocs-material
+          sudo apt-get install -y pandoc rclone
 
-markdown_extensions:
-  - tables # Ensures tables in Word translate correctly
-  - admonition # Allows for styled warning/info boxes
-  - attr_list
-  - md_in_html
+      - name: Securely Sync Google Drive Folder
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive.readonly
+          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SA_JSON }}
+        run: |
+          rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
+
+      - name: Convert Word Docs to Markdown
+        run: |
+          mkdir -p docs
+
+          find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
+            if [ ! -s "$file" ]; then
+              echo "WARNING: Skipping empty file: $file"
+              continue
+            fi
+
+            rel_path="${file#./gdrive_raw/}"
+            dir_path=$(dirname -- "$rel_path")
+            filename=$(basename -- "$file" .docx)
+            
+            mkdir -p -- "docs/$dir_path"
+            
+            echo "Processing: $filename"
+            
+            if ! pandoc -f docx -t gfm-raw_html "$file" -o "docs/$dir_path/$filename.md" --extract-media="docs/$dir_path/assets"; then
+              echo "ERROR: Failed to convert $filename."
+            else
+              sed -i -E 's/\{dir="rtl"\}//g' "docs/$dir_path/$filename.md"
+              sed -i -E 's/\{\.underline\}//g' "docs/$dir_path/$filename.md"
+              sed -i -E 's/\[([^]]+)\]/\1/g' "docs/$dir_path/$filename.md"
+              sed -i -E 's/\\$//g' "docs/$dir_path/$filename.md"
+              sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
+            fi
+          done
+
+          if [ ! -f docs/index.md ]; then
+            echo "# الصفحة الرئيسية" > docs/index.md
+            echo "مرحباً بك في قاعدة المعرفة. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+          fi
+
+      - name: Deploy to GitHub Pages
+        run: mkdocs gh-deploy --force
