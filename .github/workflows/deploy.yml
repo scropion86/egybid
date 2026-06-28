@@ -33,11 +33,13 @@ jobs:
         run: |
           rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
 
-      - name: Convert Word Docs and Build Grid Layouts
+      - name: Convert Word Docs and Build Layouts
         run: |
-          mkdir -p docs
+          # Create assets directory and download the logo
+          mkdir -p docs/assets
+          wget -qO docs/assets/logo.png https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png
           
-          # 1. Convert Documents & Hide them from Sidebar
+          # 1. Convert Documents
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
             if [ ! -s "$file" ]; then
               continue
@@ -56,42 +58,40 @@ jobs:
               sed -i -E 's/\[([^]]+)\]/\1/g' "docs/$dir_path/$filename.md"
               sed -i -E 's/\\$//g' "docs/$dir_path/$filename.md"
               sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
-              
-              # CRITICAL UX FIX: Add frontmatter to hide the article from the sidebar list
-              cat <<EOF > temp.md
-          ---
-          hide:
-            - navigation
-          ---
-          EOF
-              cat "docs/$dir_path/$filename.md" >> temp.md
-              mv temp.md "docs/$dir_path/$filename.md"
             fi
           done
 
-          # 2. Generate the Category Landing Pages (Grid Cards) with Article Counts
-          find docs -mindepth 1 -type d | while IFS= read -r dir; do
-            # Skip asset folders
+          # 2. Setup the Navigation Tree dynamically
+          echo "" >> mkdocs.yml
+          echo "nav:" >> mkdocs.yml
+          echo "  - الصفحة الرئيسية: index.md" >> mkdocs.yml
+
+          # Auto-generate homepage
+          if [ ! -f docs/index.md ]; then
+            echo "# الصفحة الرئيسية" > docs/index.md
+            echo "مرحباً بك في مقالات المكتب المصرى للتطوير الصناعي. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
+          fi
+
+          # 3. Build Grid Cards and Count Articles
+          # Using 'sort' so your numbered folders (0, 1, 2) appear in order
+          find docs -mindepth 1 -maxdepth 1 -type d | sort | while IFS= read -r dir; do
             if [[ "$dir" == *"assets"* ]]; then continue; fi
             
             foldername=$(basename -- "$dir")
-            # Count the number of articles in this specific folder
             count=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | wc -l)
             
             if [ "$count" -gt 0 ]; then
               index_file="$dir/index.md"
               
-              # Create the landing page with the count in the title
-              echo "---" > "$index_file"
-              echo "title: \"$foldername ($count)\"" >> "$index_file"
-              echo "---" >> "$index_file"
-              echo "# $foldername" >> "$index_file"
-              echo "" >> "$index_file"
+              # Inject into the sidebar with the count!
+              echo "  - \"$foldername ($count)\": \"$foldername/index.md\"" >> mkdocs.yml
               
-              # Build the Grid Cards
+              # Build the Grid Cards page
+              echo "# $foldername" > "$index_file"
+              echo "" >> "$index_file"
               echo "<div class=\"grid cards\" markdown>" >> "$index_file"
               
-              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | while IFS= read -r md_file; do
+              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | sort | while IFS= read -r md_file; do
                 article_name=$(basename -- "$md_file" .md)
                 echo "- [**$article_name**]($article_name.md)" >> "$index_file"
               done
@@ -99,12 +99,6 @@ jobs:
               echo "</div>" >> "$index_file"
             fi
           done
-
-          # 3. Auto-generate the main homepage if missing
-          if [ ! -f docs/index.md ]; then
-            echo "# الصفحة الرئيسية" > docs/index.md
-            echo "مرحباً بك في مقالات المكتب المصرى للتطوير الصناعي. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
-          fi
 
       - name: Deploy to GitHub Pages
         run: mkdocs gh-deploy --force
