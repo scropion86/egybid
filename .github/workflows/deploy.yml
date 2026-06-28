@@ -46,14 +46,17 @@ jobs:
             fi
 
             rel_path="${file#./gdrive_raw/}"
-            dir_path=$(dirname "$rel_path")
-            filename=$(basename "$file" .docx)
             
-            mkdir -p "docs/$dir_path"
+            # 2. Add '--' to protect against folder/file names that start with a dash (-)
+            dir_path=$(dirname -- "$rel_path")
+            filename=$(basename -- "$file" .docx)
+            
+            # 3. Add '--' to mkdir to protect against directory names starting with a dash
+            mkdir -p -- "docs/$dir_path"
             
             echo "Processing: $filename"
             
-            # 2. Run pandoc and capture errors without breaking the entire loop
+            # 4. Run pandoc safely
             if ! pandoc -f docx -t markdown "$file" \
               -o "docs/$dir_path/$filename.md" \
               --extract-media="docs/$dir_path/assets"; then
