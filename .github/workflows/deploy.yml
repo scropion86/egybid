@@ -66,6 +66,11 @@ jobs:
           def natural_key(p):
               return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', p.name)]
 
+          # Check if folder name is a video filming remark (e.g. 'تم تصويرها' or '- تمّ تصويرها')
+          def is_filmed_remark(name):
+              normalized = re.sub(r'^[-\s_]+', '', name).replace('ّ', '').strip()
+              return normalized == 'تم تصويرها'
+
           # Text cleaner for Facebook artifacts, dots, and stray slashes
           def clean_content(content):
               # 1. Clean facebook tracking links / hashtags / emoji CDN links (keep inner text)
@@ -114,7 +119,11 @@ jobs:
                       continue
 
                   rel_path = docx.relative_to(raw_dir)
-                  out_md = docs_dir / rel_path.with_suffix(".md")
+                  # Bypass 'تم تصويرها' / '- تمّ تصويرها' remark folder level
+                  clean_parts = [part for part in rel_path.parts if not is_filmed_remark(part)]
+                  clean_rel_path = Path(*clean_parts)
+
+                  out_md = docs_dir / clean_rel_path.with_suffix(".md")
                   out_md.parent.mkdir(parents=True, exist_ok=True)
                   media_dir = out_md.parent / "assets"
 
@@ -153,6 +162,12 @@ jobs:
                       if not re.search(r'^\s*#\s+', cleaned_content, re.MULTILINE):
                           h1_header = f"# {title}\n\n"
 
+                      # Date banner: show both if different, only create_date if identical
+                      if create_date == update_date:
+                          date_banner = f"📅 **تاريخ النشر:** {create_date}"
+                      else:
+                          date_banner = f"📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}"
+
                       frontmatter = (
                           f"---\n"
                           f"title: \"{safe_title}\"\n"
@@ -160,7 +175,7 @@ jobs:
                           f"tags:\n"
                           f"  - \"{ym}\"\n"
                           f"---\n\n"
-                          f"{h1_header}📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}\n\n"
+                          f"{h1_header}{date_banner}\n\n"
                           f"---\n\n"
                       )
                       out_md.write_text(frontmatter + cleaned_content, encoding="utf-8")
@@ -192,9 +207,9 @@ jobs:
                       t = "مقال عام"
                   items.append({t.replace('"', "'"): rel})
 
-              # Subdirectories recursively
+              # Subdirectories recursively (excluding assets, dates, and filming remarks)
               subdirs = sorted(
-                  [d for d in current_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+                  [d for d in current_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"] and not is_filmed_remark(d.name)],
                   key=natural_key
               )
               for sub in subdirs:
@@ -238,7 +253,7 @@ jobs:
           ]
 
           top_folders = sorted(
-              [d for d in docs_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+              [d for d in docs_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"] and not is_filmed_remark(d.name)],
               key=natural_key
           )
 
@@ -298,7 +313,7 @@ jobs:
 
               # Sub-sections
               subdirs = sorted(
-                  [d for d in folder.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+                  [d for d in folder.iterdir() if d.is_dir() and d.name not in ["assets", "dates"] and not is_filmed_remark(d.name)],
                   key=natural_key
               )
               for sub in subdirs:
