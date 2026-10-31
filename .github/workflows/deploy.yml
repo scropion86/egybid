@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'mkdocs.yml'
+      - 'requirements.txt'
       - '.github/workflows/**'
   schedule:
     - cron: "0 0 * * 0"
@@ -33,12 +34,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y pandoc rclone
-          pip install mkdocs-material
+          pip install -r requirements.txt
 
       - name: Securely Sync Google Drive Folder
         env:
@@ -115,6 +115,7 @@ jobs:
                   title = docx.stem.strip()
                   if title == "-":
                       title = "مقال عام"
+                  safe_title = title.replace('"', "'")
 
                   # Convert with Pandoc
                   cmd = [
@@ -135,18 +136,16 @@ jobs:
                       if not re.search(r'^\s*#\s+', content, re.MULTILINE):
                           h1_header = f"# {title}\n\n"
 
-                      frontmatter = f"""---
-          title: "{title}"
-          date: {create_date}
-          tags:
-            - "{ym}"
-          ---
-
-          {h1_header}📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}
-
-          ---
-
-          """
+                      frontmatter = (
+                          f"---\n"
+                          f"title: \"{safe_title}\"\n"
+                          f"date: {create_date}\n"
+                          f"tags:\n"
+                          f"  - \"{ym}\"\n"
+                          f"---\n\n"
+                          f"{h1_header}📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}\n\n"
+                          f"---\n\n"
+                      )
                       out_md.write_text(frontmatter + content, encoding="utf-8")
                       try:
                           dt = datetime.strptime(create_date, "%Y-%m-%d")
@@ -156,7 +155,10 @@ jobs:
                           pass
 
           # 3. Build Navigation and Category Indexes
-          nav_lines = ["\nnav:\n  - الصفحة الرئيسية: index.md\n"]
+          nav_lines = [
+              "\nnav:\n",
+              "  - الصفحة الرئيسية: index.md\n"
+          ]
 
           home_content = [
               "# المكتب المصرى للتطوير الصناعي",
@@ -190,8 +192,9 @@ jobs:
               count = len(articles)
               latest_mtime = max(a.stat().st_mtime for a in articles)
               latest_date = datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d")
+              safe_folder = folder.name.replace('"', "'")
 
-              nav_lines.append(f'  - "{folder.name} ({count}) [{latest_date}]": "{folder.name}/index.md"\n')
+              nav_lines.append(f'  - "{safe_folder} ({count}) [{latest_date}]": "{folder.name}/index.md"\n')
 
               home_content.append(f"-   [**{folder.name}**]({urllib.parse.quote(folder.name, safe='/#?=')}/index.md)")
               home_content.append("    ---")
