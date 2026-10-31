@@ -7,6 +7,7 @@ on:
       - 'mkdocs.yml'
       - 'requirements.txt'
       - '.github/workflows/**'
+      - 'docs/assets/**'
   schedule:
     - cron: "0 0 * * 0"
   workflow_dispatch:
@@ -65,12 +66,31 @@ jobs:
           def natural_key(p):
               return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', p.name)]
 
+          # Text cleaner for Facebook artifacts, dots, and stray slashes
+          def clean_content(content):
+              # 1. Clean facebook tracking links / hashtags / emoji CDN links (keep inner text)
+              content = re.sub(r'!?\[([^\]]*)\]\(https?://(?:[a-zA-Z0-9.\-_]*facebook\.com|static\.xx\.fbcdn\.net)[^\)]*\)', r'\1', content)
+              # 2. Clean standalone dots used as mobile spacer lines (., .., ...)
+              content = re.sub(r'^\s*[\.]{1,3}\s*$', '', content, flags=re.MULTILINE)
+              # 3. Clean standalone spacer dashes
+              content = re.sub(r'^\s*-\s*$', '', content, flags=re.MULTILINE)
+              # 4. Clean trailing slashes at line ends and standalone slashes
+              content = re.sub(r'\s+/\s*$', '', content, flags=re.MULTILINE)
+              content = re.sub(r'^\s*/\s*$', '', content, flags=re.MULTILINE)
+              # 5. Clean word export artifacts
+              content = re.sub(r'\{dir="rtl"\}', '', content)
+              content = re.sub(r'\{\.underline\}', '', content)
+              content = re.sub(r'\\$', '', content, flags=re.MULTILINE)
+              # 6. Normalize multiple blank lines to a single blank line
+              content = re.sub(r'\n{3,}', '\n\n', content)
+              return content.strip()
+
           raw_dir = Path("gdrive_raw")
           docs_dir = Path("docs")
           docs_dir.mkdir(exist_ok=True)
           (docs_dir / "assets").mkdir(parents=True, exist_ok=True)
 
-          # 1. Download logo safely if missing
+          # 1. Ensure logo exists
           logo_path = docs_dir / "assets" / "logo.png"
           if not logo_path.exists():
               try:
@@ -125,15 +145,12 @@ jobs:
                   ]
                   res = subprocess.run(cmd, check=False)
                   if res.returncode == 0 and out_md.exists():
-                      content = out_md.read_text(encoding="utf-8", errors="ignore")
-                      # Clean Word artifacts safely without breaking markdown links
-                      content = re.sub(r'\{dir="rtl"\}', '', content)
-                      content = re.sub(r'\{\.underline\}', '', content)
-                      content = re.sub(r'\\$', '', content, flags=re.MULTILINE)
+                      raw_content = out_md.read_text(encoding="utf-8", errors="ignore")
+                      cleaned_content = clean_content(raw_content)
 
                       # Ensure H1 heading exists
                       h1_header = ""
-                      if not re.search(r'^\s*#\s+', content, re.MULTILINE):
+                      if not re.search(r'^\s*#\s+', cleaned_content, re.MULTILINE):
                           h1_header = f"# {title}\n\n"
 
                       frontmatter = (
@@ -146,7 +163,7 @@ jobs:
                           f"{h1_header}📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}\n\n"
                           f"---\n\n"
                       )
-                      out_md.write_text(frontmatter + content, encoding="utf-8")
+                      out_md.write_text(frontmatter + cleaned_content, encoding="utf-8")
                       try:
                           dt = datetime.strptime(create_date, "%Y-%m-%d")
                           ts = dt.timestamp()
@@ -154,12 +171,59 @@ jobs:
                       except Exception:
                           pass
 
-          # 3. Build Navigation and Category Indexes
-          nav_lines = [
-              "\nnav:\n",
-              "  - الصفحة الرئيسية: index.md\n"
-          ]
+          # 3. Recursive Navigation Tree Builder
+          def build_nav_tree(current_dir, base_docs_dir):
+              items = []
+              # Put index.md first for navigation.indexes
+              index_file = current_dir / "index.md"
+              if index_file.exists():
+                  rel = index_file.relative_to(base_docs_dir).as_posix()
+                  items.append(rel)
 
+              # Direct markdown files (excluding index.md)
+              direct_files = sorted(
+                  [f for f in current_dir.iterdir() if f.is_file() and f.suffix == ".md" and f.name != "index.md"],
+                  key=natural_key
+              )
+              for f in direct_files:
+                  rel = f.relative_to(base_docs_dir).as_posix()
+                  t = f.stem.strip()
+                  if t == "-":
+                      t = "مقال عام"
+                  items.append({t.replace('"', "'"): rel})
+
+              # Subdirectories recursively
+              subdirs = sorted(
+                  [d for d in current_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+                  key=natural_key
+              )
+              for sub in subdirs:
+                  sub_tree = build_nav_tree(sub, base_docs_dir)
+                  if sub_tree:
+                      clean_sub_name = sub.name.replace('"', "'")
+                      art_count = len([f for f in sub.rglob("*.md") if f.name != "index.md"])
+                      label = f"{clean_sub_name} ({art_count})" if art_count > 0 else clean_sub_name
+                      items.append({label: sub_tree})
+
+              return items
+
+          def format_nav_yaml(items, indent=2):
+              lines = []
+              prefix = " " * indent
+              for item in items:
+                  if isinstance(item, str):
+                      lines.append(f"{prefix}- \"{item}\"\n")
+                  elif isinstance(item, dict):
+                      for k, v in item.items():
+                          safe_k = k.replace('"', "'")
+                          if isinstance(v, str):
+                              lines.append(f"{prefix}- \"{safe_k}\": \"{v}\"\n")
+                          elif isinstance(v, list):
+                              lines.append(f"{prefix}- \"{safe_k}\":\n")
+                              lines.extend(format_nav_yaml(v, indent + 2))
+              return lines
+
+          # 4. Generate Category index.md and Homepage
           home_content = [
               "# المكتب المصرى للتطوير الصناعي",
               "",
@@ -173,60 +237,100 @@ jobs:
               ""
           ]
 
-          # Discover top-level category folders
           top_folders = sorted(
               [d for d in docs_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
               key=natural_key
           )
 
           all_dates = {}
+          nav_data = [{"الصفحة الرئيسية": "index.md"}]
 
           for folder in top_folders:
-              articles = sorted(
+              all_folder_articles = sorted(
                   [f for f in folder.rglob("*.md") if f.name != "index.md"],
                   key=natural_key
               )
-              if not articles:
+              if not all_folder_articles:
                   continue
 
-              count = len(articles)
-              latest_mtime = max(a.stat().st_mtime for a in articles)
+              count = len(all_folder_articles)
+              latest_mtime = max(a.stat().st_mtime for a in all_folder_articles)
               latest_date = datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d")
-              safe_folder = folder.name.replace('"', "'")
+              clean_folder_name = folder.name.replace('"', "'")
 
-              nav_lines.append(f'  - "{safe_folder} ({count}) [{latest_date}]": "{folder.name}/index.md"\n')
+              # Section name in menu: Name and count only, NO date!
+              section_label = f"{clean_folder_name} ({count})"
 
               home_content.append(f"-   [**{folder.name}**]({urllib.parse.quote(folder.name, safe='/#?=')}/index.md)")
               home_content.append("    ---")
               home_content.append(f"    📁 {count} مقال | 🔄 آخر تحديث: `{latest_date}`\n")
 
-              # Build Category index.md
+              # Build Category index.md with sections
               cat_index = folder / "index.md"
               cat_lines = [
                   f"# {folder.name}",
                   "",
                   f"> يحتوي هذا القسم على **{count}** مقال ودراسة.",
-                  "",
-                  '<div class="grid cards" markdown>',
                   ""
               ]
 
-              for art in articles:
-                  rel_from_cat = art.relative_to(folder).as_posix()
-                  encoded_rel = urllib.parse.quote(rel_from_cat, safe="/#?=")
-                  art_title = art.stem.strip()
-                  if art_title == "-":
-                      art_title = "مقال عام"
-                  post_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
-                  ym_date = post_date[:7]
-                  all_dates.setdefault(ym_date, []).append((art, folder.name))
+              # Direct articles
+              direct_articles = sorted(
+                  [f for f in folder.glob("*.md") if f.name != "index.md"],
+                  key=natural_key
+              )
+              if direct_articles:
+                  cat_lines.append('<div class="grid cards" markdown>\n')
+                  for art in direct_articles:
+                      rel_from_cat = art.relative_to(folder).as_posix()
+                      encoded_rel = urllib.parse.quote(rel_from_cat, safe="/#?=")
+                      art_title = art.stem.strip()
+                      if art_title == "-":
+                          art_title = "مقال عام"
+                      post_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
+                      ym_date = post_date[:7]
+                      all_dates.setdefault(ym_date, []).append((art, folder.name))
 
-                  cat_lines.append(f"-   [**{art_title}**]({encoded_rel})")
-                  cat_lines.append("    ---")
-                  cat_lines.append(f"    🗓️ `{post_date}`\n")
+                      cat_lines.append(f"-   [**{art_title}**]({encoded_rel})")
+                      cat_lines.append("    ---")
+                      cat_lines.append(f"    🗓️ `{post_date}`\n")
+                  cat_lines.append("</div>\n")
 
-              cat_lines.append("</div>\n")
+              # Sub-sections
+              subdirs = sorted(
+                  [d for d in folder.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+                  key=natural_key
+              )
+              for sub in subdirs:
+                  sub_arts = sorted(
+                      [f for f in sub.rglob("*.md") if f.name != "index.md"],
+                      key=natural_key
+                  )
+                  if sub_arts:
+                      clean_sub_title = sub.name.replace('"', "'")
+                      cat_lines.append(f"\n## 📂 {clean_sub_title} ({len(sub_arts)})\n")
+                      cat_lines.append('<div class="grid cards" markdown>\n')
+                      for art in sub_arts:
+                          rel_from_cat = art.relative_to(folder).as_posix()
+                          encoded_rel = urllib.parse.quote(rel_from_cat, safe="/#?=")
+                          art_title = art.stem.strip()
+                          if art_title == "-":
+                              art_title = "مقال عام"
+                          post_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
+                          ym_date = post_date[:7]
+                          all_dates.setdefault(ym_date, []).append((art, folder.name))
+
+                          parent_tag = f"📁 {art.parent.name} | " if art.parent != sub else ""
+                          cat_lines.append(f"-   [**{art_title}**]({encoded_rel})")
+                          cat_lines.append("    ---")
+                          cat_lines.append(f"    {parent_tag}🗓️ `{post_date}`\n")
+                      cat_lines.append("</div>\n")
+
               cat_index.write_text("\n".join(cat_lines), encoding="utf-8")
+
+              # Build full navigation hierarchy for this section
+              folder_nav_tree = build_nav_tree(folder, docs_dir)
+              nav_data.append({section_label: folder_nav_tree})
 
           # Root articles if any exist directly in docs/
           root_articles = sorted(
@@ -235,6 +339,7 @@ jobs:
           )
           if root_articles:
               home_content.append('</div>\n\n## 📄 مقالات عامة\n\n<div class="grid cards" markdown>\n')
+              root_nav_items = []
               for art in root_articles:
                   encoded_rel = urllib.parse.quote(art.name, safe="/#?=")
                   art_title = art.stem.strip()
@@ -246,16 +351,18 @@ jobs:
                   home_content.append(f"-   [**{art_title}**]({encoded_rel})")
                   home_content.append("    ---")
                   home_content.append(f"    🗓️ `{post_date}`\n")
+                  root_nav_items.append({art_title.replace('"', "'"): art.name})
+              nav_data.append({"مقالات عامة": root_nav_items})
 
           home_content.append("</div>\n")
           (docs_dir / "index.md").write_text("\n".join(home_content), encoding="utf-8")
 
-          # 4. Build Date Archive
+          # 5. Build Date Archive
           dates_dir = docs_dir / "dates"
           dates_dir.mkdir(exist_ok=True)
 
           if all_dates:
-              nav_lines.append('  - "📅 الأرشيف حسب التاريخ":\n')
+              date_nav_items = []
               for ym in sorted(all_dates.keys(), reverse=True):
                   items = all_dates[ym]
                   d_count = len(items)
@@ -284,13 +391,15 @@ jobs:
                       date_lines.append(f"    {badge}🗓️ `{full_date}`\n")
                   date_lines.append("</div>\n")
                   date_file.write_text("\n".join(date_lines), encoding="utf-8")
-                  nav_lines.append(f'    - "{ym} ({d_count})": "dates/{ym}.md"\n')
+                  date_nav_items.append({f"{ym} ({d_count})": f"dates/{ym}.md"})
+              nav_data.append({"📅 الأرشيف حسب التاريخ": date_nav_items})
 
-          # Append dynamic navigation to mkdocs.yml
+          # 6. Format and append dynamic navigation to mkdocs.yml
+          formatted_nav = ["\nnav:\n"] + format_nav_yaml(nav_data, indent=2)
           with open("mkdocs.yml", "a", encoding="utf-8") as f:
-              f.writelines(nav_lines)
+              f.writelines(formatted_nav)
 
-          print("Layouts and navigation built successfully.")
+          print("Hierarchical navigation and clean layouts built successfully.")
           EOF
 
       - name: Build MkDocs Site
