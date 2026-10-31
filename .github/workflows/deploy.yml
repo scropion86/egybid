@@ -1,15 +1,29 @@
 name: Sync, Build, and Deploy Knowledge Base
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'mkdocs.yml'
+      - '.github/workflows/**'
   schedule:
     - cron: "0 0 * * 0"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -18,12 +32,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install Dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y pandoc rclone
           pip install mkdocs-material
-          sudo apt-get install -y pandoc rclone
 
       - name: Securely Sync Google Drive Folder
         env:
@@ -31,148 +46,261 @@ jobs:
           RCLONE_CONFIG_GDRIVE_SCOPE: drive.readonly
           RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
+          mkdir -p gdrive_raw
           rclone sync gdrive: ./gdrive_raw --drive-root-folder-id=1ygFywxysJBWFJa4BB6rFFWnSvcvQNL6c
 
-      - name: Convert Word Docs and Build Layouts
+      - name: Process Documents and Generate Layouts
         run: |
-          # Create assets directory and download the logo safely
-          mkdir -p docs/assets
-          wget -U "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -qO docs/assets/logo.png https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png || true
+          python - << 'EOF'
+          import os
+          import re
+          import subprocess
+          import zipfile
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+          from datetime import datetime
 
-          # 1. Convert Documents & Inject Date Metadata
-          find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
-            if [ ! -s "$file" ]; then
-              continue
-            fi
+          # Helper for natural sorting (e.g., '2' before '10')
+          def natural_key(p):
+              return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', p.name)]
 
-            rel_path="${file#./gdrive_raw/}"
-            dir_path=$(dirname -- "$rel_path")
-            filename=$(basename -- "$file" .docx)
-            md_out="docs/$dir_path/$filename.md"
-            
-            mkdir -p -- "docs/$dir_path"
+          raw_dir = Path("gdrive_raw")
+          docs_dir = Path("docs")
+          docs_dir.mkdir(exist_ok=True)
+          (docs_dir / "assets").mkdir(parents=True, exist_ok=True)
 
-            # Extract Last Modified Date from Google Drive sync
-            update_date=$(date -r "$file" "+%Y-%m-%d")
+          # 1. Download logo safely if missing
+          logo_path = docs_dir / "assets" / "logo.png"
+          if not logo_path.exists():
+              try:
+                  req = urllib.request.Request(
+                      "https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png",
+                      headers={"User-Agent": "Mozilla/5.0"}
+                  )
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      logo_path.write_bytes(resp.read())
+                  print("Logo downloaded successfully.")
+              except Exception as e:
+                  print("Logo download warning:", e)
 
-            # Extract Creation Date from Word XML metadata (fallback to update_date)
-            create_date=$(unzip -p "$file" docProps/core.xml 2>/dev/null | grep -oP '(?<=<dcterms:created xsi:type="dcterms:W3CDTF">)[^T<]+' || true)
-            if [ -z "$create_date" ]; then
-              create_date="$update_date"
-            fi
-            
-            # Create a Year-Month tag (e.g., 2024-05) for grouping
-            year_month="${create_date:0:7}"
-            
-            if pandoc -f docx -t gfm-raw_html "$file" -o "$md_out" --extract-media="docs/$dir_path/assets"; then
-              # Clean up word formatting
-              sed -i -E 's/\{dir="rtl"\}//g' "$md_out"
-              sed -i -E 's/\{\.underline\}//g' "$md_out"
-              sed -i -E 's/\[([^]]+)\]/\1/g' "$md_out"
-              sed -i -E 's/\\$//g' "$md_out"
-              sed -i -E 's/#[^[:space:]#]+//g' "$md_out"
+          # 2. Convert all docx files recursively
+          if raw_dir.exists():
+              docx_files = list(raw_dir.rglob("*.docx"))
+              print(f"Found {len(docx_files)} docx files.")
 
-              # Prepend YAML Frontmatter (with tags) and Date Banner
-              tmp_file=$(mktemp)
-              {
-                echo "---"
-                echo "date: $create_date"
-                echo "tags:"
-                echo "  - $year_month"
-                echo "---"
-                echo ""
-                echo "📅 **تاريخ النشر:** $create_date | 🔄 **آخر تحديث:** $update_date"
-                echo ""
-                echo "---"
-                echo ""
-                cat "$md_out"
-              } > "$tmp_file"
-              mv "$tmp_file" "$md_out"
+              for docx in docx_files:
+                  if docx.stat().st_size == 0:
+                      continue
 
-              # Preserve the file timestamp on the .md file
-              touch -d "$create_date" "$md_out" 2>/dev/null || touch -r "$file" "$md_out"
-            fi
-          done
+                  rel_path = docx.relative_to(raw_dir)
+                  out_md = docs_dir / rel_path.with_suffix(".md")
+                  out_md.parent.mkdir(parents=True, exist_ok=True)
+                  media_dir = out_md.parent / "assets"
 
-          # 2. Setup the Navigation Tree dynamically
-          echo "" >> mkdocs.yml
-          echo "nav:" >> mkdocs.yml
-          echo "  - الصفحة الرئيسية: index.md" >> mkdocs.yml
+                  # Dates extraction
+                  update_date = datetime.fromtimestamp(docx.stat().st_mtime).strftime("%Y-%m-%d")
+                  create_date = update_date
+                  try:
+                      with zipfile.ZipFile(docx) as z:
+                          if "docProps/core.xml" in z.namelist():
+                              xml = z.read("docProps/core.xml").decode("utf-8", errors="ignore")
+                              m = re.search(r'<dcterms:created[^>]*>([^T<]+)', xml)
+                              if m:
+                                  create_date = m.group(1).strip()
+                  except Exception:
+                      pass
 
-          # Auto-generate homepage
-          if [ ! -f docs/index.md ]; then
-            echo "# الصفحة الرئيسية" > docs/index.md
-            echo "مرحباً بك في مقالات المكتب المصرى للتطوير الصناعي. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
-          fi
+                  ym = create_date[:7]
+                  title = docx.stem.strip()
+                  if title == "-":
+                      title = "مقال عام"
 
-          # 3. Build Category Grid Cards (using sort -V so 2 comes before 10!)
-          find docs -mindepth 1 -maxdepth 1 -type d | sort -V | while IFS= read -r dir; do
-            if [[ "$dir" == *"assets"* ]] || [[ "$dir" == *"dates"* ]]; then continue; fi
-            
-            foldername=$(basename -- "$dir")
-            count=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | wc -l)
-            
-            if [ "$count" -gt 0 ]; then
-              index_file="$dir/index.md"
-              
-              # Find the newest article date in this folder for the right sidebar tag
-              latest_date=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" -printf "%TY-%Tm-%Td\n" | sort -r | head -n 1)
-              
-              # Inject into right sidebar with count and latest date tag
-              echo "  - \"$foldername ($count) [$latest_date]\": \"$foldername/index.md\"" >> mkdocs.yml
-              
-              # Build the Grid Cards page
-              echo "# $foldername" > "$index_file"
-              echo "" >> "$index_file"
-              echo "<div class=\"grid cards\" markdown>" >> "$index_file"
-              
-              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | sort -V | while IFS= read -r md_file; do
-                article_name=$(basename -- "$md_file" .md)
-                post_date=$(date -r "$md_file" "+%Y-%m-%d")
-                
-                echo "-   [**$article_name**]($article_name.md)" >> "$index_file"
-                echo "" >> "$index_file"
-                echo "    ---" >> "$index_file"
-                echo "    🗓️ \`$post_date\`" >> "$index_file"
-              done
-              
-              echo "</div>" >> "$index_file"
-            fi
-          done
+                  # Convert with Pandoc
+                  cmd = [
+                      "pandoc", "-f", "docx", "-t", "gfm-raw_html",
+                      str(docx), "-o", str(out_md),
+                      f"--extract-media={media_dir}"
+                  ]
+                  res = subprocess.run(cmd, check=False)
+                  if res.returncode == 0 and out_md.exists():
+                      content = out_md.read_text(encoding="utf-8", errors="ignore")
+                      # Clean Word artifacts safely without breaking markdown links
+                      content = re.sub(r'\{dir="rtl"\}', '', content)
+                      content = re.sub(r'\{\.underline\}', '', content)
+                      content = re.sub(r'\\$', '', content, flags=re.MULTILINE)
 
-          # 4. Build "Archive by Date" Tags in the Right Sidebar
-          mkdir -p docs/dates
-          dates_list=$(find docs -mindepth 2 -maxdepth 2 -name "*.md" ! -name "index.md" ! -path "docs/dates/*" -printf "%TY-%Tm\n" | sort -r -u)
+                      # Ensure H1 heading exists
+                      h1_header = ""
+                      if not re.search(r'^\s*#\s+', content, re.MULTILINE):
+                          h1_header = f"# {title}\n\n"
 
-          if [ -n "$dates_list" ]; then
-            echo "  - \"📅 الأرشيف حسب التاريخ\":" >> mkdocs.yml
-            
-            for ym in $dates_list; do
-              date_file="docs/dates/$ym.md"
-              echo "# مقالات شهر $ym" > "$date_file"
-              echo "" >> "$date_file"
-              echo "<div class=\"grid cards\" markdown>" >> "$date_file"
-              
-              d_count=0
-              while IFS= read -r -d '' md_file; do
-                file_ym=$(date -r "$md_file" "+%Y-%m")
-                if [ "$file_ym" = "$ym" ]; then
-                  article_name=$(basename -- "$md_file" .md)
-                  foldername=$(basename -- "$(dirname -- "$md_file")")
-                  full_date=$(date -r "$md_file" "+%Y-%m-%d")
-                  
-                  echo "-   [**$article_name**](../$foldername/$article_name.md)" >> "$date_file"
-                  echo "" >> "$date_file"
-                  echo "    ---" >> "$date_file"
-                  echo "    📁 $foldername | 🗓️ \`$full_date\`" >> "$date_file"
-                  d_count=$((d_count + 1))
-                fi
-              done < <(find docs -mindepth 2 -maxdepth 2 -name "*.md" ! -name "index.md" ! -path "docs/dates/*" -print0)
-              
-              echo "</div>" >> "$date_file"
-              echo "    - \"$ym ($d_count)\": \"dates/$ym.md\"" >> mkdocs.yml
-            done
-          fi
+                      frontmatter = f"""---
+          title: "{title}"
+          date: {create_date}
+          tags:
+            - "{ym}"
+          ---
+
+          {h1_header}📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}
+
+          ---
+
+          """
+                      out_md.write_text(frontmatter + content, encoding="utf-8")
+                      try:
+                          dt = datetime.strptime(create_date, "%Y-%m-%d")
+                          ts = dt.timestamp()
+                          os.utime(out_md, (ts, ts))
+                      except Exception:
+                          pass
+
+          # 3. Build Navigation and Category Indexes
+          nav_lines = ["\nnav:\n  - الصفحة الرئيسية: index.md\n"]
+
+          home_content = [
+              "# المكتب المصرى للتطوير الصناعي",
+              "",
+              "مرحباً بك في قاعدة المعرفة والمقالات الإدارية والصناعية للمهندس **محمود مرزوق**.",
+              "",
+              "> يمكنك استخدام شريط البحث بالأعلى للبحث في كافة الموضوعات، أو تصفح الأقسام الرئيسية أدناه.",
+              "",
+              "## 📚 الأقسام الرئيسية",
+              "",
+              '<div class="grid cards" markdown>',
+              ""
+          ]
+
+          # Discover top-level category folders
+          top_folders = sorted(
+              [d for d in docs_dir.iterdir() if d.is_dir() and d.name not in ["assets", "dates"]],
+              key=natural_key
+          )
+
+          all_dates = {}
+
+          for folder in top_folders:
+              articles = sorted(
+                  [f for f in folder.rglob("*.md") if f.name != "index.md"],
+                  key=natural_key
+              )
+              if not articles:
+                  continue
+
+              count = len(articles)
+              latest_mtime = max(a.stat().st_mtime for a in articles)
+              latest_date = datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d")
+
+              nav_lines.append(f'  - "{folder.name} ({count}) [{latest_date}]": "{folder.name}/index.md"\n')
+
+              home_content.append(f"-   [**{folder.name}**]({urllib.parse.quote(folder.name, safe='/#?=')}/index.md)")
+              home_content.append("    ---")
+              home_content.append(f"    📁 {count} مقال | 🔄 آخر تحديث: `{latest_date}`\n")
+
+              # Build Category index.md
+              cat_index = folder / "index.md"
+              cat_lines = [
+                  f"# {folder.name}",
+                  "",
+                  f"> يحتوي هذا القسم على **{count}** مقال ودراسة.",
+                  "",
+                  '<div class="grid cards" markdown>',
+                  ""
+              ]
+
+              for art in articles:
+                  rel_from_cat = art.relative_to(folder).as_posix()
+                  encoded_rel = urllib.parse.quote(rel_from_cat, safe="/#?=")
+                  art_title = art.stem.strip()
+                  if art_title == "-":
+                      art_title = "مقال عام"
+                  post_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
+                  ym_date = post_date[:7]
+                  all_dates.setdefault(ym_date, []).append((art, folder.name))
+
+                  cat_lines.append(f"-   [**{art_title}**]({encoded_rel})")
+                  cat_lines.append("    ---")
+                  cat_lines.append(f"    🗓️ `{post_date}`\n")
+
+              cat_lines.append("</div>\n")
+              cat_index.write_text("\n".join(cat_lines), encoding="utf-8")
+
+          # Root articles if any exist directly in docs/
+          root_articles = sorted(
+              [f for f in docs_dir.glob("*.md") if f.name != "index.md"],
+              key=natural_key
+          )
+          if root_articles:
+              home_content.append('</div>\n\n## 📄 مقالات عامة\n\n<div class="grid cards" markdown>\n')
+              for art in root_articles:
+                  encoded_rel = urllib.parse.quote(art.name, safe="/#?=")
+                  art_title = art.stem.strip()
+                  if art_title == "-":
+                      art_title = "مقال عام"
+                  post_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
+                  ym_date = post_date[:7]
+                  all_dates.setdefault(ym_date, []).append((art, ""))
+                  home_content.append(f"-   [**{art_title}**]({encoded_rel})")
+                  home_content.append("    ---")
+                  home_content.append(f"    🗓️ `{post_date}`\n")
+
+          home_content.append("</div>\n")
+          (docs_dir / "index.md").write_text("\n".join(home_content), encoding="utf-8")
+
+          # 4. Build Date Archive
+          dates_dir = docs_dir / "dates"
+          dates_dir.mkdir(exist_ok=True)
+
+          if all_dates:
+              nav_lines.append('  - "📅 الأرشيف حسب التاريخ":\n')
+              for ym in sorted(all_dates.keys(), reverse=True):
+                  items = all_dates[ym]
+                  d_count = len(items)
+                  date_file = dates_dir / f"{ym}.md"
+                  date_lines = [
+                      f"# مقالات شهر {ym}",
+                      "",
+                      f"> إجمالي مقالات هذا الشهر: **{d_count}** مقال.",
+                      "",
+                      '<div class="grid cards" markdown>',
+                      ""
+                  ]
+                  for art, cat_name in items:
+                      if cat_name:
+                          rel_from_docs = art.relative_to(docs_dir).as_posix()
+                      else:
+                          rel_from_docs = art.name
+                      encoded_rel = "../" + urllib.parse.quote(rel_from_docs, safe="/#?=")
+                      art_title = art.stem.strip()
+                      if art_title == "-":
+                          art_title = "مقال عام"
+                      full_date = datetime.fromtimestamp(art.stat().st_mtime).strftime("%Y-%m-%d")
+                      badge = f"📁 {cat_name} | " if cat_name else ""
+                      date_lines.append(f"-   [**{art_title}**]({encoded_rel})")
+                      date_lines.append("    ---")
+                      date_lines.append(f"    {badge}🗓️ `{full_date}`\n")
+                  date_lines.append("</div>\n")
+                  date_file.write_text("\n".join(date_lines), encoding="utf-8")
+                  nav_lines.append(f'    - "{ym} ({d_count})": "dates/{ym}.md"\n')
+
+          # Append dynamic navigation to mkdocs.yml
+          with open("mkdocs.yml", "a", encoding="utf-8") as f:
+              f.writelines(nav_lines)
+
+          print("Layouts and navigation built successfully.")
+          EOF
+
+      - name: Build MkDocs Site
+        run: mkdocs build --clean
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
 
       - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+        id: deployment
+        uses: actions/deploy-pages@v4

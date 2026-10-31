@@ -2,8 +2,9 @@
 # SITE INFORMATION
 # ====================================
 site_name: مقالات المكتب المصرى للتطوير الصناعي
-site_description: مقالات المكتب المصرى للتطوير الصناعي
+site_description: مقالات ودراسات المكتب المصرى للتطوير الصناعي - م. محمود مرزوق
 site_author: م-محمود مرزوق
+site_url: https://mlotfy.win/egybid/
 
 # ====================================
 # UI, HEADERS, AND THEME
@@ -12,15 +13,15 @@ theme:
   name: material
   language: ar
   direction: rtl
-  
-  # Injecting your Logo
+
+  # Logo & Favicon
   logo: assets/logo.png
   favicon: assets/logo.png
-  
+
   font:
     text: Tajawal
     code: Roboto Mono
-  
+
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -38,20 +39,37 @@ theme:
         name: تفعيل الوضع المضيء
 
   features:
-    - navigation.top              
-    - header.autohide             
-    - search.suggest              
-    - search.highlight            
+    - navigation.top
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.indexes
+    - header.autohide
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
 
 plugins:
   - search:
-      lang: ar
+      lang:
+        - ar
+        - en
+      separator: '[\s\-\.\,\(\)\[\]\/]+'
+  - tags
 
 markdown_extensions:
   - tables
   - admonition
-  - attr_list                   
-  - md_in_html                  
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 # ====================================
 # FOOTER SOCIAL LINKS
