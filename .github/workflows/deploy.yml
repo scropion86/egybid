@@ -2,7 +2,7 @@ name: Sync, Build, and Deploy Knowledge Base
 
 on:
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install Dependencies
         run: |
@@ -35,11 +35,11 @@ jobs:
 
       - name: Convert Word Docs and Build Layouts
         run: |
-          # Create assets directory and download the logo safely (masquerading as Chrome)
+          # Create assets directory and download the logo safely
           mkdir -p docs/assets
           wget -U "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -qO docs/assets/logo.png https://egybid.com/wp-content/uploads/2021/11/logo-horizontal.png || true
-          
-          # 1. Convert Documents
+
+          # 1. Convert Documents & Inject Date Metadata
           find ./gdrive_raw -name "*.docx" -print0 | while IFS= read -r -d '' file; do
             if [ ! -s "$file" ]; then
               continue
@@ -48,16 +48,49 @@ jobs:
             rel_path="${file#./gdrive_raw/}"
             dir_path=$(dirname -- "$rel_path")
             filename=$(basename -- "$file" .docx)
+            md_out="docs/$dir_path/$filename.md"
             
             mkdir -p -- "docs/$dir_path"
+
+            # Extract Last Modified Date from Google Drive sync
+            update_date=$(date -r "$file" "+%Y-%m-%d")
+
+            # Extract Creation Date from Word XML metadata (fallback to update_date)
+            create_date=$(unzip -p "$file" docProps/core.xml 2>/dev/null | grep -oP '(?<=<dcterms:created xsi:type="dcterms:W3CDTF">)[^T<]+' || true)
+            if [ -z "$create_date" ]; then
+              create_date="$update_date"
+            fi
             
-            if pandoc -f docx -t gfm-raw_html "$file" -o "docs/$dir_path/$filename.md" --extract-media="docs/$dir_path/assets"; then
+            # Create a Year-Month tag (e.g., 2024-05) for grouping
+            year_month="${create_date:0:7}"
+            
+            if pandoc -f docx -t gfm-raw_html "$file" -o "$md_out" --extract-media="docs/$dir_path/assets"; then
               # Clean up word formatting
-              sed -i -E 's/\{dir="rtl"\}//g' "docs/$dir_path/$filename.md"
-              sed -i -E 's/\{\.underline\}//g' "docs/$dir_path/$filename.md"
-              sed -i -E 's/\[([^]]+)\]/\1/g' "docs/$dir_path/$filename.md"
-              sed -i -E 's/\\$//g' "docs/$dir_path/$filename.md"
-              sed -i -E 's/#[^[:space:]#]+//g' "docs/$dir_path/$filename.md"
+              sed -i -E 's/\{dir="rtl"\}//g' "$md_out"
+              sed -i -E 's/\{\.underline\}//g' "$md_out"
+              sed -i -E 's/\[([^]]+)\]/\1/g' "$md_out"
+              sed -i -E 's/\\$//g' "$md_out"
+              sed -i -E 's/#[^[:space:]#]+//g' "$md_out"
+
+              # Prepend YAML Frontmatter (with tags) and Date Banner
+              tmp_file=$(mktemp)
+              {
+                echo "---"
+                echo "date: $create_date"
+                echo "tags:"
+                echo "  - $year_month"
+                echo "---"
+                echo ""
+                echo "📅 **تاريخ النشر:** $create_date | 🔄 **آخر تحديث:** $update_date"
+                echo ""
+                echo "---"
+                echo ""
+                cat "$md_out"
+              } > "$tmp_file"
+              mv "$tmp_file" "$md_out"
+
+              # Preserve the file timestamp on the .md file
+              touch -d "$create_date" "$md_out" 2>/dev/null || touch -r "$file" "$md_out"
             fi
           done
 
@@ -72,10 +105,9 @@ jobs:
             echo "مرحباً بك في مقالات المكتب المصرى للتطوير الصناعي. يرجى اختيار أحد الأقسام من القائمة للتصفح." >> docs/index.md
           fi
 
-          # 3. Build Grid Cards and Count Articles
-          # Using 'sort' so your numbered folders (0, 1, 2) appear in order
-          find docs -mindepth 1 -maxdepth 1 -type d | sort | while IFS= read -r dir; do
-            if [[ "$dir" == *"assets"* ]]; then continue; fi
+          # 3. Build Category Grid Cards (using sort -V so 2 comes before 10!)
+          find docs -mindepth 1 -maxdepth 1 -type d | sort -V | while IFS= read -r dir; do
+            if [[ "$dir" == *"assets"* ]] || [[ "$dir" == *"dates"* ]]; then continue; fi
             
             foldername=$(basename -- "$dir")
             count=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | wc -l)
@@ -83,22 +115,64 @@ jobs:
             if [ "$count" -gt 0 ]; then
               index_file="$dir/index.md"
               
-              # Inject into the sidebar with the count!
-              echo "  - \"$foldername ($count)\": \"$foldername/index.md\"" >> mkdocs.yml
+              # Find the newest article date in this folder for the right sidebar tag
+              latest_date=$(find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" -printf "%TY-%Tm-%Td\n" | sort -r | head -n 1)
+              
+              # Inject into right sidebar with count and latest date tag
+              echo "  - \"$foldername ($count) [$latest_date]\": \"$foldername/index.md\"" >> mkdocs.yml
               
               # Build the Grid Cards page
               echo "# $foldername" > "$index_file"
               echo "" >> "$index_file"
               echo "<div class=\"grid cards\" markdown>" >> "$index_file"
               
-              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | sort | while IFS= read -r md_file; do
+              find "$dir" -maxdepth 1 -name "*.md" ! -name "index.md" | sort -V | while IFS= read -r md_file; do
                 article_name=$(basename -- "$md_file" .md)
-                echo "- [**$article_name**]($article_name.md)" >> "$index_file"
+                post_date=$(date -r "$md_file" "+%Y-%m-%d")
+                
+                echo "-   [**$article_name**]($article_name.md)" >> "$index_file"
+                echo "" >> "$index_file"
+                echo "    ---" >> "$index_file"
+                echo "    🗓️ \`$post_date\`" >> "$index_file"
               done
               
               echo "</div>" >> "$index_file"
             fi
           done
+
+          # 4. Build "Archive by Date" Tags in the Right Sidebar
+          mkdir -p docs/dates
+          dates_list=$(find docs -mindepth 2 -maxdepth 2 -name "*.md" ! -name "index.md" ! -path "docs/dates/*" -printf "%TY-%Tm\n" | sort -r -u)
+
+          if [ -n "$dates_list" ]; then
+            echo "  - \"📅 الأرشيف حسب التاريخ\":" >> mkdocs.yml
+            
+            for ym in $dates_list; do
+              date_file="docs/dates/$ym.md"
+              echo "# مقالات شهر $ym" > "$date_file"
+              echo "" >> "$date_file"
+              echo "<div class=\"grid cards\" markdown>" >> "$date_file"
+              
+              d_count=0
+              while IFS= read -r -d '' md_file; do
+                file_ym=$(date -r "$md_file" "+%Y-%m")
+                if [ "$file_ym" = "$ym" ]; then
+                  article_name=$(basename -- "$md_file" .md)
+                  foldername=$(basename -- "$(dirname -- "$md_file")")
+                  full_date=$(date -r "$md_file" "+%Y-%m-%d")
+                  
+                  echo "-   [**$article_name**](../$foldername/$article_name.md)" >> "$date_file"
+                  echo "" >> "$date_file"
+                  echo "    ---" >> "$date_file"
+                  echo "    📁 $foldername | 🗓️ \`$full_date\`" >> "$date_file"
+                  d_count=$((d_count + 1))
+                fi
+              done < <(find docs -mindepth 2 -maxdepth 2 -name "*.md" ! -name "index.md" ! -path "docs/dates/*" -print0)
+              
+              echo "</div>" >> "$date_file"
+              echo "    - \"$ym ($d_count)\": \"dates/$ym.md\"" >> mkdocs.yml
+            done
+          fi
 
       - name: Deploy to GitHub Pages
         run: mkdocs gh-deploy --force
