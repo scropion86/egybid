@@ -41,6 +41,16 @@ jobs:
           sudo apt-get update && sudo apt-get install -y pandoc rclone
           pip install -r requirements.txt
 
+      - name: Cache Documents and Sync Data
+        uses: actions/cache@v4
+        with:
+          path: |
+            gdrive_raw
+            docs
+          key: kb-cache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            kb-cache-${{ runner.os }}-
+
       - name: Securely Sync Google Drive Folder
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: drive
@@ -109,10 +119,14 @@ jobs:
               except Exception as e:
                   print("Logo download warning:", e)
 
-          # 2. Convert all docx files recursively
+          # 2. Incremental Conversion of docx files
           if raw_dir.exists():
               docx_files = list(raw_dir.rglob("*.docx"))
-              print(f"Found {len(docx_files)} docx files.")
+              print(f"Total docx files found: {len(docx_files)}")
+
+              converted_count = 0
+              skipped_count = 0
+              valid_md_targets = set()
 
               for docx in docx_files:
                   if docx.stat().st_size == 0:
@@ -124,8 +138,14 @@ jobs:
                   clean_rel_path = Path(*clean_parts)
 
                   out_md = docs_dir / clean_rel_path.with_suffix(".md")
+                  valid_md_targets.add(out_md.resolve())
                   out_md.parent.mkdir(parents=True, exist_ok=True)
                   media_dir = out_md.parent / "assets"
+
+                  # Comparator: skip if markdown already exists and is up to date
+                  if out_md.exists() and out_md.stat().st_mtime >= docx.stat().st_mtime:
+                      skipped_count += 1
+                      continue
 
                   # Dates extraction
                   update_date = datetime.fromtimestamp(docx.stat().st_mtime).strftime("%Y-%m-%d")
@@ -185,6 +205,20 @@ jobs:
                           os.utime(out_md, (ts, ts))
                       except Exception:
                           pass
+                      converted_count += 1
+
+              print(f"Incremental conversion complete: {converted_count} converted, {skipped_count} skipped (unchanged).")
+
+              # Prune deleted articles
+              pruned_count = 0
+              for existing_md in list(docs_dir.rglob("*.md")):
+                  rel_str = str(existing_md.relative_to(docs_dir)).replace("\\", "/")
+                  if existing_md.name != "index.md" and not rel_str.startswith("dates"):
+                      if existing_md.resolve() not in valid_md_targets:
+                          existing_md.unlink(missing_ok=True)
+                          pruned_count += 1
+              if pruned_count > 0:
+                  print(f"Pruned {pruned_count} obsolete articles.")
 
           # 3. Recursive Navigation Tree Builder
           def build_nav_tree(current_dir, base_docs_dir):
