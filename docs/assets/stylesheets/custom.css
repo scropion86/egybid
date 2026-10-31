@@ -1,0 +1,64 @@
+/* ========================================================
+   Egyptian Office for Industrial Development (EGYBID)
+   Custom Stylesheet for Material for MkDocs
+   ======================================================== */
+
+/* 1. Header Logo enlargement */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 2.6rem !important;
+  width: auto !important;
+  max-height: none !important;
+}
+
+/* Also enlarge logo in mobile drawer header */
+.md-nav__button.md-logo img,
+.md-nav__button.md-logo svg {
+  height: 2.6rem !important;
+  width: auto !important;
+}
+
+/* 2. Grid Cards Polish */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 8px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-color: var(--md-primary-fg-color);
+}
+
+/* Prevent date / badge awkward wrapping in cards */
+.md-typeset .grid.cards > ul > li code {
+  white-space: nowrap;
+  font-size: 0.85rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* 3. Breadcrumb navigation polish */
+.md-path {
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.85;
+}
+
+.md-path__item:not(:last-child)::after {
+  content: " / ";
+  margin: 0 0.25rem;
+  opacity: 0.6;
+}
+
+/* 4. Article post metadata banner */
+.post-metadata-banner {
+  background-color: var(--md-code-bg-color);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1.2rem;
+  font-size: 0.88rem;
+  border-right: 4px solid var(--md-primary-fg-color);
+}

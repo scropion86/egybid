@@ -12,6 +12,9 @@ on:
     - cron: "0 0 * * 0"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: true
+
 permissions:
   contents: read
   pages: write
@@ -188,6 +191,20 @@ jobs:
                       else:
                           date_banner = f"📅 **تاريخ النشر:** {create_date} | 🔄 **آخر تحديث:** {update_date}"
 
+                      # Source hierarchy trail
+                      section_name = clean_parts[0] if clean_parts else ""
+                      sub_section = " › ".join(clean_parts[1:-1]) if len(clean_parts) > 2 else ""
+                      hierarchy_badge = f"📁 **القسم:** {section_name}"
+                      if sub_section:
+                          hierarchy_badge += f" › {sub_section}"
+
+                      post_banner = (
+                          f'<div class="post-metadata-banner">\n'
+                          f'{hierarchy_badge}<br />\n'
+                          f'{date_banner}\n'
+                          f'</div>\n\n'
+                      )
+
                       frontmatter = (
                           f"---\n"
                           f"title: \"{safe_title}\"\n"
@@ -195,8 +212,7 @@ jobs:
                           f"tags:\n"
                           f"  - \"{ym}\"\n"
                           f"---\n\n"
-                          f"{h1_header}{date_banner}\n\n"
-                          f"---\n\n"
+                          f"{h1_header}{post_banner}"
                       )
                       out_md.write_text(frontmatter + cleaned_content, encoding="utf-8")
                       try:
@@ -272,8 +288,13 @@ jobs:
                               lines.extend(format_nav_yaml(v, indent + 2))
               return lines
 
-          # 4. Generate Category index.md and Homepage
+          # 4. Generate Category index.md and Homepage (hide TOC on overview pages to eliminate 3-column crowding)
           home_content = [
+              "---",
+              "hide:",
+              "  - toc",
+              "---",
+              "",
               "# المكتب المصرى للتطوير الصناعي",
               "",
               "مرحباً بك في قاعدة المعرفة والمقالات الإدارية والصناعية للمهندس **محمود مرزوق**.",
@@ -314,9 +335,14 @@ jobs:
               home_content.append("    ---")
               home_content.append(f"    📁 {count} مقال | 🔄 آخر تحديث: `{latest_date}`\n")
 
-              # Build Category index.md with sections
+              # Build Category index.md with sections (hide TOC so cards occupy full width comfortably)
               cat_index = folder / "index.md"
               cat_lines = [
+                  "---",
+                  "hide:",
+                  "  - toc",
+                  "---",
+                  "",
                   f"# {folder.name}",
                   "",
                   f"> يحتوي هذا القسم على **{count}** مقال ودراسة.",
@@ -406,7 +432,7 @@ jobs:
           home_content.append("</div>\n")
           (docs_dir / "index.md").write_text("\n".join(home_content), encoding="utf-8")
 
-          # 5. Build Date Archive
+          # 5. Build Date Archive (hide TOC on date pages as well)
           dates_dir = docs_dir / "dates"
           dates_dir.mkdir(exist_ok=True)
 
@@ -417,6 +443,11 @@ jobs:
                   d_count = len(items)
                   date_file = dates_dir / f"{ym}.md"
                   date_lines = [
+                      "---",
+                      "hide:",
+                      "  - toc",
+                      "---",
+                      "",
                       f"# مقالات شهر {ym}",
                       "",
                       f"> إجمالي مقالات هذا الشهر: **{d_count}** مقال.",
